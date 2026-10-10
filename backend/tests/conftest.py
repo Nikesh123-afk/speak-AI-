@@ -1,4 +1,5 @@
 import itertools
+import re
 import tempfile
 import uuid
 
@@ -54,11 +55,33 @@ def assessor() -> FakeAssessor:
     return FakeAssessor()
 
 
+class FakeMailer:
+    def __init__(self) -> None:
+        self.sent: list[dict] = []
+
+    async def __call__(self, to, subject, body, headers=None):
+        self.sent.append({"to": to, "subject": subject, "body": body, "headers": headers or {}})
+
+    def link(self, to: str, path: str) -> str:
+        """The token from the latest email to `to` containing a link to `path`."""
+        for mail in reversed(self.sent):
+            if mail["to"] == to and (match := re.search(re.escape(path) + r"\?(\S+)", mail["body"])):
+                return match.group(1)
+        raise AssertionError(f"no {path} email to {to}")
+
+
 @pytest.fixture
-def make_client(engine, settings, assessor):
+def mailer() -> FakeMailer:
+    return FakeMailer()
+
+
+@pytest.fixture
+def make_client(engine, settings, assessor, mailer):
     """Each client gets its own IP and cookie jar, like a separate browser."""
-    def build(app_settings: Settings | None = None) -> httpx.AsyncClient:
-        app = create_app(app_settings or settings, engine=engine, assessor=assessor, feedback_available=True)
+    def build(app_settings: Settings | None = None, stripe=None) -> httpx.AsyncClient:
+        app = create_app(app_settings or settings, engine=engine, assessor=assessor, feedback_available=True, mailer=mailer)
+        if stripe is not None:
+            app.state.stripe = stripe
         transport = httpx.ASGITransport(app=app, client=(next(_ips), 50000), raise_app_exceptions=False)
         return httpx.AsyncClient(transport=transport, base_url="http://test", headers=HEADERS)
     return build

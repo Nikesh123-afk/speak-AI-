@@ -8,7 +8,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .config import Settings
 from .errors import AppError
 from .feedback import Assessor
+from .mail import Mailer
 from .models import AuthSession, User
+from .schemas import UserOut
 from .security import SESSION_COOKIE, digest, valid_token
 
 
@@ -25,8 +27,20 @@ def get_assessor(request: Request) -> Assessor:
     return request.app.state.assessor
 
 
+def get_mailer(request: Request) -> Mailer:
+    return request.app.state.mailer
+
+
 Db = Annotated[AsyncSession, Depends(get_db)]
 AppSettings = Annotated[Settings, Depends(get_settings)]
+AppMailer = Annotated[Mailer, Depends(get_mailer)]
+
+
+def user_out(user: User, settings: Settings) -> UserOut:
+    out = UserOut.model_validate(user)
+    # Verification matters: otherwise anyone could sign up with an admin address nobody has registered yet.
+    out.is_admin = user.email_verified_at is not None and user.email in settings.admins
+    return out
 
 
 async def optional_user(request: Request, db: Db) -> User | None:
@@ -47,3 +61,12 @@ async def require_user(user: Annotated[User | None, Depends(optional_user)]) -> 
 
 CurrentUser = Annotated[User, Depends(require_user)]
 MaybeUser = Annotated[User | None, Depends(optional_user)]
+
+
+async def require_admin(user: CurrentUser, settings: AppSettings) -> User:
+    if not user_out(user, settings).is_admin:
+        raise AppError(404, "Not found.")
+    return user
+
+
+AdminUser = Annotated[User, Depends(require_admin)]

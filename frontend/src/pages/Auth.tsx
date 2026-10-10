@@ -60,6 +60,16 @@ export function AuthPage({ mode }: { mode: 'login' | 'signup' }) {
             hint={signup ? 'At least 12 characters. A short phrase works well.' : undefined}
             error={fieldErrors.password}
           />
+          {!signup && (
+            <p className="-mt-2 text-right text-sm">
+              <Link to="/forgot-password" className="text-muted underline-offset-4 hover:text-ink hover:underline">Forgot password?</Link>
+            </p>
+          )}
+          {signup && (
+            <p className="text-sm text-muted">
+              By creating an account you agree to the <Link to="/terms" className="underline underline-offset-4">terms</Link> and <Link to="/privacy" className="underline underline-offset-4">privacy policy</Link>.
+            </p>
+          )}
           <Button type="submit" className="w-full" disabled={auth.isPending}>
             {auth.isPending ? 'Please wait…' : signup ? 'Create account' : 'Log in'}
           </Button>

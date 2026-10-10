@@ -9,6 +9,5 @@
 .env.*
 .npm-cache
 .pnpm-store
-legacy
 backend/tests
 frontend/src/test

@@ -86,7 +86,7 @@ function ExaminerPreview() {
 
 function HowItWorks() {
   const steps = [
-    ['Pick a topic', 'Choose a common Part 1 topic, or paste the questions your teacher gave you.'],
+    ['Pick a part and topic', 'Part 1 questions, a Part 2 cue card or a Part 3 discussion — or paste the questions your teacher gave you.'],
     ['Answer aloud', 'The examiner reads each question in a British voice. Speak — or type if your browser can’t transcribe.'],
     ['Review and repeat', 'See scores per criterion, what worked, and two or three precise things to change next time.'],
   ];
@@ -148,8 +148,8 @@ function Scoring() {
 
 const PLANS: { id: Plan; name: string; price: string; period: string; blurb: string; features: string[] }[] = [
   { id: 'free', name: 'Free', price: '$0', period: '', blurb: 'Try the format.', features: ['3 assessed sessions', 'Part 1 topics', 'Voice or typed answers'] },
-  { id: 'standard', name: 'Standard', price: '$15', period: '/ month', blurb: 'For steady weekly practice.', features: ['Unlimited sessions', 'Parts 1, 2 and 3', 'Full timed mock tests', 'Progress history', 'Custom question sets'] },
-  { id: 'premium', name: 'Premium', price: '$35', period: '/ 3 months', blurb: 'For the final stretch before test day.', features: ['Everything in Standard', 'Best value for 12 weeks', 'Priority email support'] },
+  { id: 'standard', name: 'Standard', price: '$15', period: '/ month', blurb: 'For steady weekly practice.', features: ['Unlimited sessions (fair use)', 'Part 1, 2 and 3 practice', 'Full timed mock tests', 'Progress chart per criterion', 'Custom question sets'] },
+  { id: 'premium', name: 'Premium', price: '$35', period: '/ 3 months', blurb: 'For the final stretch before test day.', features: ['Everything in Standard', 'Best value for 12 weeks', 'Priority email support (1 business day)'] },
 ];
 
 function Pricing() {

@@ -5,8 +5,7 @@ IELTS Speaking practice: an examiner reads questions aloud, the candidate answer
 ```
 frontend/   React 19 + TypeScript, Vite, Tailwind CSS 4, React Router, TanStack Query
 backend/    Python 3.12, FastAPI, SQLAlchemy 2 (async) + asyncpg, Alembic, Pydantic
-            PostgreSQL · argon2id · Gemini · Stripe
-legacy/     Previous Node.js implementation, kept for reference — safe to delete
+            PostgreSQL · argon2id · Gemini · Stripe · SMTP · Sentry (optional)
 ```
 
 ## Local development
@@ -32,7 +31,11 @@ Demo accounts: `cd backend && .venv/Scripts/python -m app.seed` creates `demo@ie
 
 Optional: copy `.env.example` to `.env` and add `GEMINI_API_KEY` to turn on feedback, and the four `STRIPE_*` values to turn on paid plans.
 
+Email in development: without `SMTP_HOST`, password-reset, confirmation and newsletter emails are printed in the API log, so you can open their links directly.
+
 ## Checks
+
+CI (`.github/workflows/ci.yml`) runs all of these on every push and pull request, then builds the Docker image.
 
 ```bash
 cd backend  && .venv/Scripts/python -m pytest          # API tests against real PostgreSQL
@@ -47,6 +50,9 @@ cd frontend && pnpm typecheck && pnpm lint && pnpm test && pnpm build
 - **Rate limits** live in PostgreSQL, so they hold across instances.
 - **Feedback** is idempotent: the client sends an `Idempotency-Key` per attempt, so retries never re-run or re-count an assessment. The provider call happens outside any transaction. Failed attempts don't use free quota.
 - **Billing.** Plans change only from verified Stripe webhooks, which re-read the customer's subscriptions so out-of-order events are harmless.
+- **Email links.** Reset (1 h) and confirmation (48 h) tokens are random, stored only as SHA-256 hashes, and deleted on use. Forgot-password answers identically for unknown emails and sends after responding. A reset or password change signs out other sessions.
+- **Newsletter.** Double opt-in. Confirm and unsubscribe links are HMAC-signed with `SECRET_KEY`; newsletter emails carry RFC 8058 one-click `List-Unsubscribe`.
+- **Privacy.** Users can export everything as JSON and delete their account (cancelling Stripe subscriptions first) from `/account`. The admin view shows aggregates only. Sentry, when enabled, never receives request bodies, locals or PII.
 - **Headers.** Strict CSP (`'self'` only — fonts are self-hosted), HSTS in production, `nosniff`, `frame-ancestors 'none'`, request IDs on every response.
 
 ## Production
@@ -62,11 +68,20 @@ On any container platform:
 2. Set `APP_ENV=production` and an `https://` `APP_ORIGIN`. The app refuses to start without both.
 3. Run `alembic upgrade head` as a release step before new instances start.
 4. Set `FORWARDED_ALLOW_IPS` to your load balancer's address so client IPs (used for rate limits) are trusted only from it.
-5. Probes: `/api/health` (liveness), `/api/ready` (database).
+5. Set `SECRET_KEY`, `SMTP_HOST` and `MAIL_FROM` (the app refuses to start without them), and `SUPPORT_EMAIL`. Optionally `ADMIN_EMAILS` and `SENTRY_DSN`.
+6. Probes: `/api/health` (liveness), `/api/ready` (database).
+
+### Newsletter
+
+```bash
+cd backend
+.venv/Scripts/python -m app.newsletter "October speaking tips" tips.txt          # dry run: recipient count
+.venv/Scripts/python -m app.newsletter "October speaking tips" tips.txt --send   # sends to confirmed subscribers
+```
 
 ### Stripe
 
-Create recurring Standard and Premium prices; set `STRIPE_SECRET_KEY`, `STRIPE_STANDARD_PRICE_ID`, `STRIPE_PREMIUM_PRICE_ID`. Add a webhook to `https://<origin>/api/billing/webhook` for `customer.subscription.*`, `invoice.paid` and `invoice.payment_failed`, and set `STRIPE_WEBHOOK_SECRET`. Enable the Customer Portal in Stripe settings. Local testing: `stripe listen --forward-to localhost:8000/api/billing/webhook`.
+Create recurring Standard and Premium prices; set `STRIPE_SECRET_KEY`, `STRIPE_STANDARD_PRICE_ID`, `STRIPE_PREMIUM_PRICE_ID`. Add a webhook to `https://<origin>/api/billing/webhook` for `customer.subscription.*`, `invoice.paid` and `invoice.payment_failed`, and set `STRIPE_WEBHOOK_SECRET`. Enable the Customer Portal in Stripe settings, with cancellation and switching between the Standard and Premium prices turned on: "Manage billing" and Standard→Premium upgrades go through it. Local testing: `stripe listen --forward-to localhost:8000/api/billing/webhook`.
 
 ## Assessment scope
 

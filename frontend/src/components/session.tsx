@@ -5,7 +5,8 @@ import { api, ApiError } from '../lib/api';
 import { keys } from '../lib/queries';
 import { averageScore } from '../lib/score';
 import { speechInputSupported, stopSpeaking, useDictation } from '../lib/useSpeech';
-import type { Answer, Practice } from '../lib/types';
+import { usePersistentState } from '../lib/usePersistentState';
+import type { Answer, CueCard as CueCardData, Practice } from '../lib/types';
 import { Bars, Button, ButtonLink, Eyebrow, ScoreDial } from './ui';
 
 export interface AssessmentBody {
@@ -22,10 +23,14 @@ type AssessmentState =
   | { name: 'result'; practice: Practice };
 
 /** Submits a finished session. Retries reuse the same idempotency key, so nothing is assessed or counted twice. */
-export function useAssessment() {
+export function useAssessment(onResult?: () => void) {
   const client = useQueryClient();
   const [state, setState] = useState<AssessmentState>({ name: 'idle' });
   const last = useRef<{ body: AssessmentBody; key: string } | null>(null);
+  const resultCallback = useRef(onResult);
+  useEffect(() => {
+    resultCallback.current = onResult;
+  });
 
   const submit = useCallback(
     async (body: AssessmentBody, key: string) => {
@@ -33,8 +38,9 @@ export function useAssessment() {
       setState({ name: 'assessing' });
       try {
         const { practice } = await api<{ practice: Practice }>('/api/feedback', { method: 'POST', headers: { 'Idempotency-Key': key }, body });
-        client.invalidateQueries({ queryKey: keys.practices });
+        for (const key of [keys.practices, keys.progress, keys.usage]) client.invalidateQueries({ queryKey: key });
         setState({ name: 'result', practice });
+        resultCallback.current?.();
       } catch (error) {
         setState({ name: 'failed', error: error instanceof ApiError ? error : new ApiError(0, 'Something went wrong.') });
       }
@@ -69,17 +75,24 @@ export function useCountdown(seconds: number, onDone?: () => void) {
 
 export const clock = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 
+/** Typical answer lengths, in seconds, for the soft cue under Part 1 and Part 3 questions. */
+export const PACE = { 1: [15, 30], 3: [30, 60] } as const satisfies Record<number, readonly [number, number]>;
+
 interface AnswerBoxProps {
   submitLabel: string;
   onSubmit: (text: string) => void;
+  /** Saves the unfinished answer under this key so a reload doesn't lose it. */
+  draftKey: string;
   /** Hard speaking limit in seconds; recording stops when it runs out. */
   timeLimit?: number;
+  /** Soft guide: the usual answer length range, shown as an elapsed timer. */
+  pace?: readonly [number, number];
   autoRecord?: boolean;
   placeholder?: string;
 }
 
-export function AnswerBox({ submitLabel, onSubmit, timeLimit, autoRecord, placeholder }: AnswerBoxProps) {
-  const [text, setText] = useState('');
+export function AnswerBox({ submitLabel, onSubmit, draftKey, timeLimit, pace, autoRecord, placeholder }: AnswerBoxProps) {
+  const [text, setText] = usePersistentState(`draft:${draftKey}`, '');
   const dictation = useDictation(setText);
   const { start, stop } = dictation;
 
@@ -89,12 +102,21 @@ export function AnswerBox({ submitLabel, onSubmit, timeLimit, autoRecord, placeh
 
   function submit() {
     stop();
-    if (text.trim()) onSubmit(text.trim());
+    const answer = text.trim();
+    if (!answer) return;
+    // Cleared directly: the box usually unmounts on submit, before its storage effect would run.
+    try {
+      window.sessionStorage.removeItem(`draft:${draftKey}`);
+    } catch {
+      // Storage blocked; nothing was saved.
+    }
+    onSubmit(answer);
   }
 
   return (
     <div className="rounded-3xl border border-line bg-card p-5 sm:p-6">
       {timeLimit !== undefined && <SpeakingTimer seconds={timeLimit} onDone={stop} />}
+      {pace && timeLimit === undefined && <PaceCue range={pace} />}
       <label htmlFor="answer" className="sr-only">Your answer</label>
       <textarea
         id="answer"
@@ -137,6 +159,96 @@ function SpeakingTimer({ seconds, onDone }: { seconds: number; onDone: () => voi
   );
 }
 
+function PaceCue({ range: [min, max] }: { range: readonly [number, number] }) {
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    const started = Date.now();
+    const timer = window.setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const hint = elapsed < min ? `Most answers run ${min}–${max} seconds` : elapsed <= max ? 'Good length' : 'Time to wrap up this answer';
+  return (
+    <p className="mb-4 flex flex-wrap items-center gap-x-3 text-sm text-muted">
+      <span className={`font-display font-semibold tabular-nums ${elapsed > max ? 'text-warn' : 'text-ink'}`} aria-live="off">{clock(elapsed)}</span>
+      <span>{hint}</span>
+    </p>
+  );
+}
+
+export function CueCard({ card, compact = false }: { card: CueCardData; compact?: boolean }) {
+  return (
+    <div className={`rounded-3xl border-2 border-dashed border-signal/50 bg-card ${compact ? 'mt-4 p-5' : 'p-7 sm:p-8'}`}>
+      <p className={`font-display font-semibold leading-snug ${compact ? 'text-lg' : 'text-2xl sm:text-3xl'}`}>{card.prompt}</p>
+      <p className="mt-4 text-sm font-medium text-muted">You should say:</p>
+      <ul className={`mt-2 space-y-1 ${compact ? 'text-[15px]' : 'text-lg'}`}>
+        {card.points.map(point => (
+          <li key={point} className="flex gap-2"><span className="text-signal" aria-hidden="true">•</span>{point}</li>
+        ))}
+      </ul>
+      <p className={`mt-2 ${compact ? 'text-[15px]' : 'text-lg'}`}>{card.closing}</p>
+    </div>
+  );
+}
+
+export const PREP_SECONDS = 60;
+export const LONG_TURN_SECONDS = 120;
+
+export function Preparation({ card, onDone }: { card: CueCardData; onDone: () => void }) {
+  const left = useCountdown(PREP_SECONDS, onDone);
+  return (
+    <>
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <Eyebrow>Part 2 · Preparation</Eyebrow>
+          <h1 className="mt-3 text-2xl font-semibold sm:text-3xl">You have one minute to prepare.</h1>
+        </div>
+        <span className="font-display text-5xl font-semibold tabular-nums text-signal-strong" role="timer" aria-label={`${left} seconds left`}>{clock(left)}</span>
+      </div>
+      <div className="mt-6"><CueCard card={card} /></div>
+      <label htmlFor="notes" className="mt-6 block text-sm font-medium">Notes <span className="font-normal text-muted">(only for you — not sent or marked)</span></label>
+      <textarea id="notes" rows={4} className="mt-2 block w-full rounded-2xl border border-line bg-card p-4 focus:border-ink focus:outline-none" placeholder="Key words, examples, a story to tell…" />
+      <div className="mt-6 flex flex-wrap items-center gap-4">
+        <Button size="lg" onClick={onDone}>I’m ready — start speaking</Button>
+        <span className="text-sm text-muted">Recording starts automatically when the minute is up.</span>
+      </div>
+    </>
+  );
+}
+
+/** The two-minute Part 2 talk, recording from the start. */
+export function LongTurn({ card, draftKey, submitLabel, onSubmit }: { card: CueCardData; draftKey: string; submitLabel: string; onSubmit: (text: string) => void }) {
+  return (
+    <>
+      <Eyebrow>Part 2 · Long turn</Eyebrow>
+      <CueCard card={card} compact />
+      <div className="mt-6">
+        <AnswerBox
+          draftKey={draftKey}
+          timeLimit={LONG_TURN_SECONDS}
+          autoRecord
+          placeholder="Recording has started — speak about the topic on your card."
+          submitLabel={submitLabel}
+          onSubmit={onSubmit}
+        />
+      </div>
+    </>
+  );
+}
+
+/** Shown when a finished session was saved but not marked (a reload while it was being sent). */
+export function SavedAnswers({ onSubmit, onDiscard }: { onSubmit: () => void; onDiscard: () => void }) {
+  return (
+    <div className="mx-auto max-w-xl py-10 text-center">
+      <h1 className="text-3xl font-medium">Your answers are saved</h1>
+      <p className="mt-3 text-muted">You finished this session but it hasn’t been marked yet. Sending it again won’t count twice.</p>
+      <div className="mt-8 flex flex-wrap justify-center gap-3">
+        <Button onClick={onSubmit}>Get feedback</Button>
+        <Button variant="secondary" onClick={onDiscard}>Discard</Button>
+      </div>
+    </div>
+  );
+}
+
 export function AssessingView({ mock = false }: { mock?: boolean }) {
   return (
     <div className="grid min-h-[50vh] place-items-center text-center">
@@ -166,7 +278,7 @@ export function FailedView({ error, onRetry, onExit, exitLabel }: { error: ApiEr
 
 const PART_NAMES: Record<number, string> = { 1: 'Part 1 · Interview', 2: 'Part 2 · Long turn', 3: 'Part 3 · Discussion' };
 
-export function ResultView({ practice, onAgain, againLabel }: { practice: Practice; onAgain: () => void; againLabel: string }) {
+export function ResultView({ practice, onAgain, againLabel }: { practice: Practice; onAgain?: () => void; againLabel?: string }) {
   const feedback = practice.feedback!;
   const mock = practice.kind === 'mock';
   const groups = mock ? [1, 2, 3].map(part => ({ part, answers: practice.answers.filter(a => a.part === part) })) : [{ part: 0, answers: practice.answers }];
@@ -174,7 +286,7 @@ export function ResultView({ practice, onAgain, againLabel }: { practice: Practi
 
   return (
     <div className="mx-auto max-w-4xl">
-      <Eyebrow>{mock ? 'Mock test result' : 'Feedback'} · {practice.topic}</Eyebrow>
+      <Eyebrow>{mock ? 'Mock test result' : `Part ${practice.part} feedback`} · {practice.topic}</Eyebrow>
       <div className="mt-6 grid items-center justify-items-center gap-8 rounded-3xl border border-line bg-card p-5 sm:p-8 md:grid-cols-[auto_1fr] md:justify-items-stretch md:gap-10">
         <ScoreDial value={averageScore(feedback)} label="Transcript score" />
         <dl className="w-full space-y-4">
@@ -218,7 +330,7 @@ export function ResultView({ practice, onAgain, againLabel }: { practice: Practi
       </details>
 
       <div className="mt-10 flex flex-wrap gap-3">
-        <Button size="lg" onClick={onAgain}>{againLabel}</Button>
+        {onAgain && <Button size="lg" onClick={onAgain}>{againLabel}</Button>}
         <Link to="/dashboard" className="inline-flex h-13 items-center px-3 text-muted hover:text-ink">View progress</Link>
       </div>
     </div>

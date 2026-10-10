@@ -21,6 +21,19 @@ class Settings(BaseSettings):
     stripe_webhook_secret: str = ""
     stripe_standard_price_id: str = ""
     stripe_premium_price_id: str = ""
+    # Signs newsletter confirm/unsubscribe links. Required in production.
+    secret_key: str = "dev-insecure-secret-key"
+    # Outgoing email (password reset, verification, newsletter). Without SMTP_HOST, emails are logged in development.
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_starttls: bool = True
+    mail_from: str = ""
+    support_email: str = ""
+    # Comma-separated. Admins must also have verified their email.
+    admin_emails: str = ""
+    sentry_dsn: str = ""
 
     @field_validator("database_url")
     @classmethod
@@ -41,7 +54,15 @@ class Settings(BaseSettings):
                 raise ValueError("Production requires DATABASE_URL for PostgreSQL")
             if parts.scheme != "https":
                 raise ValueError("Production requires an HTTPS APP_ORIGIN")
+            if len(self.secret_key) < 32 or self.secret_key.startswith("dev-"):
+                raise ValueError("Production requires a random SECRET_KEY of at least 32 characters")
+            if not (self.smtp_host and self.mail_from):
+                raise ValueError("Production requires SMTP_HOST and MAIL_FROM so password reset emails can be sent")
         return self
+
+    @property
+    def admins(self) -> set[str]:
+        return {e.strip().lower() for e in self.admin_emails.split(",") if e.strip()}
 
     @property
     def production(self) -> bool:

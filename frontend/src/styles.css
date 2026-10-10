@@ -21,6 +21,11 @@
   --color-warn-soft: #fbf0d9;
   --color-danger: #b42318;
 
+  /* Chart series, fixed order. Validated (lightness, chroma, CVD separation) against the card surface. */
+  --color-series-1: #2a78d6;
+  --color-series-2: #eb6834;
+  --color-series-3: #1baf7a;
+
   --animate-wave: wave 1.1s ease-in-out infinite;
   @keyframes wave {
     0%, 100% { transform: scaleY(0.35); }
@@ -45,6 +50,9 @@
       --color-warn: #e7b45a;
       --color-warn-soft: #33281a;
       --color-danger: #f27a6f;
+      --color-series-1: #3987e5;
+      --color-series-2: #d95926;
+      --color-series-3: #199e70;
     }
   }
 

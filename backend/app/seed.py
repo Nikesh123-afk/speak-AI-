@@ -1,6 +1,7 @@
 """Create demo accounts for local development: `python -m app.seed`. Refuses to run in production."""
 import asyncio
 import uuid
+from datetime import UTC, datetime
 
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
@@ -32,11 +33,12 @@ async def main() -> None:
         for name, email, plan in ACCOUNTS:
             user = (await db.execute(select(User).where(User.email == email))).scalar_one_or_none()
             if user is None:
-                user = User(name=name, email=email, password_hash=password_hash, plan=plan)
+                user = User(name=name, email=email, password_hash=password_hash, plan=plan, email_verified_at=datetime.now(UTC))
                 db.add(user)
                 await db.flush()
             else:
                 user.password_hash, user.plan = password_hash, plan
+                user.email_verified_at = user.email_verified_at or datetime.now(UTC)
             # Premium gets sample history so the dashboard has something to show; free keeps all 3 sessions.
             await db.execute(delete(Practice).where(Practice.user_id == user.id))
             if plan == "premium":

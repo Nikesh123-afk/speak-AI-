@@ -64,6 +64,48 @@ MOCK_TESTS = [
             "Can a person be a role model without being famous?",
         ]},
     },
+    {
+        "id": "media",
+        "title": "Test 4 · Books & media",
+        "part1": {"topic": "Reading", "questions": [
+            "Do you enjoy reading?",
+            "What did you like to read when you were younger?",
+            "Do you prefer printed books or reading on a screen?",
+            "Where do you usually read?",
+        ]},
+        "part2": {
+            "prompt": "Describe a book or film that made a strong impression on you.",
+            "points": ["what it was", "when you read or watched it", "what it was about"],
+            "closing": "and explain why it made such an impression on you.",
+        },
+        "part3": {"topic": "Media and storytelling", "questions": [
+            "Why do you think some stories stay popular for generations?",
+            "Do films based on books usually do them justice?",
+            "How has social media changed the way people get news?",
+            "Should governments control what children can watch online?",
+        ]},
+    },
+    {
+        "id": "work",
+        "title": "Test 5 · Work & decisions",
+        "part1": {"topic": "Weather", "questions": [
+            "What's the weather like where you live?",
+            "What's your favourite season? Why?",
+            "Does the weather affect your mood?",
+            "Have you ever experienced extreme weather?",
+        ]},
+        "part2": {
+            "prompt": "Describe an important decision you made.",
+            "points": ["what the decision was", "when you made it", "how you made it"],
+            "closing": "and explain why it was important to you.",
+        },
+        "part3": {"topic": "Decisions and careers", "questions": [
+            "What kinds of decisions do young people find hardest to make?",
+            "Should parents help their children choose a career?",
+            "Do people today have too many choices?",
+            "Is it better to make decisions quickly or to take time over them?",
+        ]},
+    },
 ]
 
 

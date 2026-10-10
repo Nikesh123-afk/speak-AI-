@@ -1,16 +1,18 @@
 import { useEffect } from 'react';
-import { useNavigate, useSearchParams } from 'react-router';
+import { Link, useNavigate, useSearchParams } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
-import { keys, useBillingRedirect, useConfig, useLogout, usePractices } from '../lib/queries';
+import { keys, useBillingRedirect, useConfig, useLogout, usePractices, useProgress } from '../lib/queries';
 import { averageScore, formatScore } from '../lib/score';
 import type { User } from '../lib/types';
 import { Button, ButtonLink, Eyebrow, Spinner } from '../components/ui';
+import { ProgressChart } from '../components/ProgressChart';
 import { useToast } from '../components/Toast';
 
-const PLAN_LABEL = { free: 'Free', standard: 'Standard', premium: 'Premium' } as const;
+export const PLAN_LABEL = { free: 'Free', standard: 'Standard', premium: 'Premium' } as const;
 
 export function Dashboard({ user }: { user: User }) {
-  const { data, isLoading } = usePractices();
+  const history = usePractices();
+  const { data: points = [] } = useProgress();
   const { data: config } = useConfig();
   const billing = useBillingRedirect();
   const logout = useLogout();
@@ -28,11 +30,13 @@ export function Dashboard({ user }: { user: User }) {
     return () => window.clearTimeout(timer);
   }, [params, setParams, toast, client]);
 
-  const practices = data?.practices ?? [];
-  const scores = practices.map(p => averageScore(p.feedback)).filter((v): v is number => v !== null);
+  const practices = history.data?.pages.flatMap(page => page.practices) ?? [];
+  const total = history.data?.pages[0]?.total ?? 0;
+  // Progress points are oldest first.
+  const scores = points.map(p => averageScore({ criteria: p.criteria, strengths: [], improvements: [], summary: '' })).filter((v): v is number => v !== null);
   const stats = [
-    ['Sessions', String(data?.total ?? 0)],
-    ['Latest score', formatScore(scores[0])],
+    ['Sessions', String(total)],
+    ['Latest score', formatScore(scores.at(-1))],
     ['Best score', formatScore(scores.length ? Math.max(...scores) : null)],
   ];
 
@@ -56,6 +60,8 @@ export function Dashboard({ user }: { user: User }) {
                 Manage billing
               </Button>
             ))}
+          <ButtonLink to="/account" variant="secondary">Account</ButtonLink>
+          {user.isAdmin && <ButtonLink to="/admin" variant="ghost">Admin</ButtonLink>}
           <Button variant="ghost" onClick={() => logout.mutate(undefined, { onSuccess: () => navigate('/') })}>Log out</Button>
         </div>
       </div>
@@ -70,8 +76,13 @@ export function Dashboard({ user }: { user: User }) {
       </dl>
 
       <section className="mt-12">
+        <h2 className="text-2xl font-medium">Progress</h2>
+        <div className="mt-6"><ProgressChart points={points} /></div>
+      </section>
+
+      <section className="mt-12">
         <h2 className="text-2xl font-medium">History</h2>
-        {isLoading ? (
+        {history.isLoading ? (
           <div className="mt-6"><Spinner label="Loading history" /></div>
         ) : practices.length === 0 ? (
           <div className="mt-6 rounded-3xl border border-dashed border-line p-10 text-center">
@@ -79,28 +90,40 @@ export function Dashboard({ user }: { user: User }) {
             <ButtonLink to="/practice" className="mt-5">Start practising</ButtonLink>
           </div>
         ) : (
-          <ul className="mt-6 divide-y divide-line rounded-3xl border border-line bg-card">
-            {practices.map(p => (
-              <li key={p.id} className="flex items-center justify-between gap-4 p-4 sm:p-5">
-                <div className="min-w-0">
-                  <p className="truncate font-medium">{p.topic}</p>
-                  <p className="text-sm text-muted">
-                    {new Date(p.createdAt).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })} · {p.kind === 'mock' ? 'Full mock test' : `Part ${p.part}`} · {p.answers.length} {p.answers.length === 1 ? 'answer' : 'answers'}
-                  </p>
-                </div>
-                <div className="flex items-center gap-5">
-                  <div className="hidden gap-4 text-xs text-muted md:flex">
-                    {Object.entries(p.feedback?.criteria ?? {}).filter(([, v]) => v !== null).map(([k, v]) => (
-                      <span key={k}>{k.split(' ')[0]} <span className="tabular-nums text-ink">{formatScore(v)}</span></span>
-                    ))}
-                  </div>
-                  <span className="grid size-12 shrink-0 place-items-center rounded-full bg-signal-soft font-display text-lg tabular-nums text-signal-strong">
-                    {formatScore(averageScore(p.feedback))}
-                  </span>
-                </div>
-              </li>
-            ))}
-          </ul>
+          <>
+            <ul className="mt-6 divide-y divide-line overflow-hidden rounded-3xl border border-line bg-card">
+              {practices.map(p => (
+                <li key={p.id}>
+                  <Link to={`/history/${p.id}`} className="flex items-center justify-between gap-4 p-4 transition-colors hover:bg-sunken sm:p-5">
+                    <div className="min-w-0">
+                      <p className="truncate font-medium">{p.topic}</p>
+                      <p className="text-sm text-muted">
+                        {new Date(p.createdAt).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })} · {p.kind === 'mock' ? 'Full mock test' : `Part ${p.part}`} · {p.answers.length} {p.answers.length === 1 ? 'answer' : 'answers'}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-5">
+                      <div className="hidden gap-4 text-xs text-muted md:flex">
+                        {Object.entries(p.feedback?.criteria ?? {}).filter(([, v]) => v !== null).map(([k, v]) => (
+                          <span key={k}>{k.split(' ')[0]} <span className="tabular-nums text-ink">{formatScore(v)}</span></span>
+                        ))}
+                      </div>
+                      <span className="grid size-12 shrink-0 place-items-center rounded-full bg-signal-soft font-display text-lg tabular-nums text-signal-strong">
+                        {formatScore(averageScore(p.feedback))}
+                      </span>
+                    </div>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+            <div className="mt-5 flex items-center justify-between gap-4 text-sm text-muted">
+              <span>Showing {practices.length} of {total}</span>
+              {history.hasNextPage && (
+                <Button variant="secondary" disabled={history.isFetchingNextPage} onClick={() => history.fetchNextPage()}>
+                  {history.isFetchingNextPage ? 'Loading…' : 'Load more'}
+                </Button>
+              )}
+            </div>
+          </>
         )}
       </section>
     </div>

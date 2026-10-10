@@ -1,5 +1,7 @@
 import logging
 
+import sentry_sdk
+
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -39,6 +41,10 @@ def install(app: FastAPI) -> None:
 
     @app.exception_handler(Exception)
     async def unexpected(request: Request, error: Exception):
-        # Log the type only: messages from drivers and providers can contain user data.
-        log.error("Request failed", extra={"request_id": getattr(request.state, "request_id", None), "error_type": type(error).__name__})
+        # Production logs carry the type only: messages from drivers and providers can contain user data.
+        # Sentry (when SENTRY_DSN is set) gets the stack trace, with bodies, locals and PII disabled.
+        request_id = getattr(request.state, "request_id", None)
+        sentry_sdk.capture_exception(error)
+        log.error("Request failed", exc_info=None if request.app.state.settings.production else error,
+                  extra={"request_id": request_id, "error_type": type(error).__name__})
         return error_response(request, 500, "Something went wrong. Please try again.")

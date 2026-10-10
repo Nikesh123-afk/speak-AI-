@@ -18,7 +18,10 @@ PROMPT = (
     "and do not claim an overall IELTS band. Mention the transcript-only limitation in the summary. "
     "If the input is a full mock test, answers are tagged with their part: judge the Part 2 long turn on how well "
     "it is sustained and organised, Part 3 on how well opinions are developed and justified, and say in the "
-    "summary how performance differed between the parts."
+    "summary how performance differed between the parts. "
+    "For single-part practice, the `part` field says which: Part 1 answers should be direct and briefly extended, "
+    "a Part 2 answer is a one-to-two-minute long turn on the cue card, and Part 3 answers should develop and "
+    "justify opinions."
 )
 BAND = {"type": "number", "minimum": 0, "maximum": 9, "multipleOf": 0.5}
 LIST = {"type": "array", "items": {"type": "string", "maxLength": 1000}, "minItems": 1, "maxItems": 6}

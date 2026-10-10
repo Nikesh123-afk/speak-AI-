@@ -25,6 +25,40 @@ async def history(user: CurrentUser, db: Db, offset: Annotated[int, Query(ge=0, 
     return PracticePage(practices=[PracticeOut.model_validate(p) for p in rows], total=total, offset=offset)
 
 
+@router.get("/practices/{practice_id}")
+async def practice_detail(practice_id: uuid.UUID, user: CurrentUser, db: Db) -> dict[str, PracticeOut]:
+    practice = (await db.execute(select(Practice).where(
+        Practice.id == practice_id, Practice.user_id == user.id, Practice.status == "complete"))).scalar_one_or_none()
+    if practice is None:
+        raise AppError(404, "This session doesn't exist or isn't yours.")
+    return {"practice": PracticeOut.model_validate(practice)}
+
+
+@router.get("/progress")
+async def progress(user: CurrentUser, db: Db) -> dict[str, list[dict]]:
+    """Criterion scores over time for the progress chart: the latest 200 sessions, oldest first."""
+    rows = (await db.execute(
+        select(Practice.id, Practice.created_at, Practice.kind, Practice.part, Practice.feedback["criteria"])
+        .where(Practice.user_id == user.id, Practice.status == "complete")
+        .order_by(Practice.created_at.desc()).limit(200)
+    )).all()
+    points = [{"id": str(r[0]), "createdAt": r[1].isoformat(), "kind": r[2], "part": r[3], "criteria": r[4] or {}} for r in rows]
+    return {"points": points[::-1]}
+
+
+async def free_used(db: Db, user_id: uuid.UUID) -> int:
+    return (await db.execute(select(func.count()).select_from(Practice).where(
+        Practice.user_id == user_id, Practice.status.in_(("pending", "complete"))))).scalar_one()
+
+
+@router.get("/usage")
+async def usage(user: CurrentUser, db: Db) -> dict[str, int | None]:
+    if user.plan != "free":
+        return {"limit": None, "used": None, "left": None}
+    used = await free_used(db, user.id)
+    return {"limit": FREE_ASSESSMENTS, "used": used, "left": max(0, FREE_ASSESSMENTS - used)}
+
+
 @router.post("/feedback", status_code=201, response_model=dict[str, PracticeOut])
 async def feedback(body: PracticeIn, request: Request, response: Response, user: CurrentUser, db: Db,
                    assessor: Annotated[Assessor, Depends(get_assessor)],
@@ -55,9 +89,7 @@ async def feedback(body: PracticeIn, request: Request, response: Response, user:
             raise AppError(403, "Full mock tests are included in the Standard and Premium plans.")
         if body.part != 1:
             raise AppError(403, "Your plan includes Part 1 practice.")
-        used = (await db.execute(select(func.count()).select_from(Practice).where(
-            Practice.user_id == user.id, Practice.status.in_(("pending", "complete"))))).scalar_one()
-        if used >= FREE_ASSESSMENTS:
+        if await free_used(db, user.id) >= FREE_ASSESSMENTS:
             raise AppError(403, "Your three free assessments have been used. Choose a paid plan to continue.")
     practice_id = (await db.execute(
         insert(Practice).values(id=uuid.uuid4(), user_id=user.id, request_key=idempotency_key, kind=body.kind,

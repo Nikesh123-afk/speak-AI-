@@ -1,0 +1,10 @@
+{
+  "name": "IELTS Fluent AI",
+  "short_name": "IELTS Fluent",
+  "description": "IELTS Speaking practice with transcript feedback.",
+  "start_url": "/practice",
+  "display": "standalone",
+  "background_color": "#faf6f0",
+  "theme_color": "#e8590c",
+  "icons": [{ "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}
