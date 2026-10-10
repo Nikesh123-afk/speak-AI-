@@ -1,0 +1,10 @@
+node_modules
+dist
+.data
+.env
+.env.*
+.npm-cache
+.pnpm-store
+tests
+test
+server.js

@@ -1,0 +1,39 @@
+# Production-like stack: PostgreSQL, a one-off migration job, then the app.
+# Secrets come from .env (never committed). Put a TLS-terminating proxy in front for real traffic.
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ielts
+      POSTGRES_USER: ielts
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ielts -d ielts"]
+      interval: 5s
+      retries: 10
+
+  migrate:
+    build: .
+    command: ["alembic", "upgrade", "head"]
+    environment: &env
+      APP_ENV: production
+      DATABASE_URL: postgresql://ielts:${POSTGRES_PASSWORD}@db:5432/ielts
+      APP_ORIGIN: ${APP_ORIGIN:?set APP_ORIGIN to your https:// origin}
+      FORWARDED_ALLOW_IPS: "*"
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      STRIPE_STANDARD_PRICE_ID: ${STRIPE_STANDARD_PRICE_ID:-}
+      STRIPE_PREMIUM_PRICE_ID: ${STRIPE_PREMIUM_PRICE_ID:-}
+    depends_on: { db: { condition: service_healthy } }
+
+  app:
+    build: .
+    environment: *env
+    ports: ["8000:8000"]
+    depends_on: { migrate: { condition: service_completed_successfully } }
+    restart: unless-stopped
+
+volumes:
+  pgdata:

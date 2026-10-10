@@ -1,0 +1,14 @@
+**/node_modules
+**/dist
+**/.venv
+**/__pycache__
+**/.pytest_cache
+**/*.egg-info
+.data
+.env
+.env.*
+.npm-cache
+.pnpm-store
+legacy
+backend/tests
+frontend/src/test
