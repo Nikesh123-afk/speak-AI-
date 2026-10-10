@@ -1,19 +1,25 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link, NavLink, Outlet, useLocation } from 'react-router';
+import { useMutation } from '@tanstack/react-query';
 import { api, ApiError } from '../lib/api';
-import { useMe } from '../lib/queries';
+import { useConfig, useMe } from '../lib/queries';
 import { ButtonLink, Logo } from './ui';
+import { ErrorBoundary } from './ErrorBoundary';
 import { useToast } from './Toast';
 
 export function Layout() {
+  const { pathname } = useLocation();
   return (
     <div className="flex min-h-dvh flex-col">
       <a href="#main" className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-full focus:bg-ink focus:px-4 focus:py-2 focus:text-paper">
         Skip to content
       </a>
       <Header />
+      <VerifyBanner />
       <main id="main" className="flex-1">
-        <Outlet />
+        <ErrorBoundary resetKey={pathname}>
+          <Outlet />
+        </ErrorBoundary>
       </main>
       <Footer />
     </div>
@@ -80,7 +86,12 @@ function Header() {
             <NavLink to="/practice" className={mobileLink}>Practice</NavLink>
             <NavLink to="/mock-test" className={mobileLink}>Mock test</NavLink>
             <a href="/#pricing" className="block rounded-xl px-3 py-3 text-base text-muted hover:bg-sunken hover:text-ink">Pricing</a>
-            {user ? <NavLink to="/dashboard" className={mobileLink}>Dashboard</NavLink> : <NavLink to="/login" className={mobileLink}>Log in</NavLink>}
+            {user ? (
+              <>
+                <NavLink to="/dashboard" className={mobileLink}>Dashboard</NavLink>
+                <NavLink to="/account" className={mobileLink}>Account</NavLink>
+              </>
+            ) : <NavLink to="/login" className={mobileLink}>Log in</NavLink>}
           </div>
         </div>
       )}
@@ -88,7 +99,30 @@ function Header() {
   );
 }
 
+function VerifyBanner() {
+  const { data: user } = useMe();
+  const { pathname } = useLocation();
+  const toast = useToast();
+  const resend = useMutation({
+    mutationFn: () => api<{ message: string }>('/api/auth/resend-verification', { method: 'POST', body: {} }),
+    onSuccess: ({ message }) => toast(message),
+    onError: error => toast(error.message),
+  });
+  if (!user || user.emailVerifiedAt || pathname === '/verify-email') return null;
+  return (
+    <div className="border-b border-warn/30 bg-warn-soft text-sm text-warn">
+      <p className="container-page flex flex-wrap items-center gap-x-3 gap-y-1 py-2.5">
+        <span>Please confirm your email — we sent a link to <strong className="font-medium break-all">{user.email}</strong>. You’ll need it to reset your password.</span>
+        <button type="button" disabled={resend.isPending} onClick={() => resend.mutate()} className="font-medium underline underline-offset-4 disabled:opacity-50">
+          Resend link
+        </button>
+      </p>
+    </div>
+  );
+}
+
 function Footer() {
+  const { data: config } = useConfig();
   const toast = useToast();
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
@@ -116,8 +150,10 @@ function Footer() {
         </div>
         <div className="flex flex-col gap-2 text-sm">
           <Link to="/practice" className="text-muted hover:text-ink">Practice</Link>
+          <Link to="/mock-test" className="text-muted hover:text-ink">Mock test</Link>
           <a href="/#pricing" className="text-muted hover:text-ink">Pricing</a>
           <a href="/#faq" className="text-muted hover:text-ink">FAQ</a>
+          <Link to="/contact" className="text-muted hover:text-ink">{config?.supportEmail ? 'Contact & support' : 'Contact'}</Link>
         </div>
         <form onSubmit={subscribe} className="min-w-0 space-y-2 sm:col-span-2 lg:col-span-1" noValidate>
           <label htmlFor="subscribe-email" className="text-sm font-medium">Monthly speaking tips</label>
@@ -127,11 +163,16 @@ function Footer() {
             <button disabled={busy} className="h-11 shrink-0 rounded-full sm:h-10 bg-ink px-4 text-sm font-medium text-paper hover:bg-signal-strong disabled:opacity-50">Subscribe</button>
           </div>
           {error && <p className="text-sm text-danger">{error}</p>}
+          <p className="text-xs text-muted">We’ll email you to confirm. Unsubscribe any time.</p>
         </form>
       </div>
       <div className="container-page flex flex-col gap-2 border-t border-line py-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] text-xs text-muted lg:flex-row lg:justify-between">
         <span>© {new Date().getFullYear()} IELTS Fluent AI. Not affiliated with IELTS, the British Council, IDP or Cambridge.</span>
-        <span>Scores are practice guidance, not official results.</span>
+        <span className="flex flex-wrap gap-x-4 gap-y-1">
+          <span>Scores are practice guidance, not official results.</span>
+          <Link to="/privacy" className="hover:text-ink">Privacy</Link>
+          <Link to="/terms" className="hover:text-ink">Terms</Link>
+        </span>
       </div>
     </footer>
   );

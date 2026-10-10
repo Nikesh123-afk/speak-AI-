@@ -32,7 +32,44 @@ class UserOut(BaseModel):
     name: str
     email: str
     plan: Literal["free", "standard", "premium"]
+    email_verified_at: datetime | None = Field(serialization_alias="emailVerifiedAt")
+    is_admin: bool = Field(False, serialization_alias="isAdmin")
     created_at: datetime = Field(serialization_alias="createdAt")
+
+
+class EmailIn(Strict):
+    email: Email
+
+
+class TokenIn(Strict):
+    token: str = Field(min_length=1, max_length=128)
+
+
+class ResetIn(TokenIn):
+    password: str = Field(min_length=12, max_length=128)
+
+
+class ProfileIn(Strict):
+    name: text(100)
+
+
+class EmailChangeIn(Strict):
+    email: Email
+    password: str = Field(min_length=1, max_length=128)
+
+
+class PasswordChangeIn(Strict):
+    current_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=12, max_length=128)
+
+
+class PasswordConfirmIn(Strict):
+    password: str = Field(min_length=1, max_length=128)
+
+
+class SignedEmailIn(Strict):
+    email: Email
+    token: str = Field(min_length=64, max_length=64)
 
 
 class AnswerIn(Strict):
@@ -78,10 +115,6 @@ class PracticePage(BaseModel):
     practices: list[PracticeOut]
     total: int
     offset: int
-
-
-class SubscribeIn(Strict):
-    email: Email
 
 
 class CheckoutIn(Strict):

@@ -1,12 +1,21 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMockTests } from '../lib/queries';
 import { speak, speechInputSupported, stopSpeaking } from '../lib/useSpeech';
+import { useLeaveWarning, usePersistentState } from '../lib/usePersistentState';
 import type { Answer, MockTest, User } from '../lib/types';
 import { Button, ButtonLink, Eyebrow, Spinner } from '../components/ui';
-import { AnswerBox, AssessingView, FailedView, ResultView, clock, useAssessment, useCountdown } from '../components/session';
+import {
+  AnswerBox, AssessingView, FailedView, LongTurn, PACE, Preparation, ResultView, SavedAnswers, useAssessment,
+} from '../components/session';
 
-const PREP_SECONDS = 60;
-const LONG_TURN_SECONDS = 120;
+/** A sitting in progress. Persisted, so a reload resumes at the same step instead of losing every answer. */
+interface Sitting {
+  test: MockTest;
+  key: string;
+  index: number;
+  answers: Answer[];
+  finished: boolean;
+}
 
 type Step =
   | { type: 'intro'; part: 1 | 2 | 3; script: string }
@@ -30,9 +39,10 @@ export function buildSteps(test: MockTest): Step[] {
 }
 
 export function MockTestPage({ user }: { user: User }) {
-  const [running, setRunning] = useState<{ test: MockTest; key: string } | null>(null);
-  const assessment = useAssessment();
+  const [running, setRunning] = usePersistentState<Sitting | null>('mock-sitting', null);
+  const assessment = useAssessment(() => setRunning(null));
   useEffect(() => () => stopSpeaking(), []);
+  const submit = (sitting: Sitting) => assessment.submit({ kind: 'mock', topic: sitting.test.title, answers: sitting.answers }, sitting.key);
 
   const restart = () => {
     assessment.reset();
@@ -43,15 +53,20 @@ export function MockTestPage({ user }: { user: User }) {
   if (assessment.state.name === 'assessing') content = <AssessingView mock />;
   else if (assessment.state.name === 'failed') content = <FailedView error={assessment.state.error} onRetry={assessment.retry} onExit={restart} exitLabel="Back to mock tests" />;
   else if (assessment.state.name === 'result') content = <ResultView practice={assessment.state.practice} onAgain={restart} againLabel="Take another mock test" />;
+  else if (running?.finished) content = <SavedAnswers onSubmit={() => submit(running)} onDiscard={restart} />;
   else if (running)
     content = (
       <Runner
-        test={running.test}
+        sitting={running}
+        onChange={setRunning}
         onExit={() => setRunning(null)}
-        onFinish={answers => assessment.submit({ kind: 'mock', topic: running.test.title, answers }, running.key)}
+        onFinish={finished => {
+          setRunning(finished);
+          submit(finished);
+        }}
       />
     );
-  else content = <Intro user={user} onStart={test => setRunning({ test, key: crypto.randomUUID() })} />;
+  else content = <Intro user={user} onStart={test => setRunning({ test, key: crypto.randomUUID(), index: 0, answers: [], finished: false })} />;
 
   return <div className="container-page py-12 sm:py-16">{content}</div>;
 }
@@ -127,19 +142,14 @@ function Intro({ user, onStart }: { user: User; onStart: (test: MockTest) => voi
   );
 }
 
-function Runner({ test, onExit, onFinish }: { test: MockTest; onExit: () => void; onFinish: (answers: Answer[]) => void }) {
+function Runner({ sitting, onChange, onExit, onFinish }: {
+  sitting: Sitting; onChange: (s: Sitting) => void; onExit: () => void; onFinish: (s: Sitting) => void;
+}) {
+  const { test, index, answers, key } = sitting;
   const steps = useMemo(() => buildSteps(test), [test]);
-  const [index, setIndex] = useState(0);
-  const [answers, setAnswers] = useState<Answer[]>([]);
-  const step = steps[index];
+  const step = steps[Math.min(index, steps.length - 1)];
   const part = step.type === 'prep' || step.type === 'longTurn' ? 2 : step.part;
-
-  // Leaving mid-test would lose every answer, so ask first.
-  useEffect(() => {
-    const warn = (e: BeforeUnloadEvent) => e.preventDefault();
-    window.addEventListener('beforeunload', warn);
-    return () => window.removeEventListener('beforeunload', warn);
-  }, []);
+  useLeaveWarning(true);
 
   useEffect(() => {
     if (step.type === 'intro') speak(step.script);
@@ -148,15 +158,14 @@ function Runner({ test, onExit, onFinish }: { test: MockTest; onExit: () => void
     // No speech during the long turn: recording is already running and would transcribe the examiner's voice.
   }, [step, test]);
 
-  const next = () => setIndex(i => i + 1);
+  const next = () => onChange({ ...sitting, index: index + 1 });
   function record(answer: Answer) {
     const all = [...answers, answer];
     if (index + 1 < steps.length) {
-      setAnswers(all);
-      next();
+      onChange({ ...sitting, answers: all, index: index + 1 });
     } else {
       stopSpeaking();
-      onFinish(all);
+      onFinish({ ...sitting, answers: all, finished: true });
     }
   }
   function exit() {
@@ -190,27 +199,18 @@ function Runner({ test, onExit, onFinish }: { test: MockTest; onExit: () => void
             <button onClick={() => speak(step.question)} className="mt-4 text-sm text-muted underline-offset-4 hover:text-ink hover:underline">Hear it again</button>
             <div className="mt-10">
               <AnswerBox
+                draftKey={`${key}:${index}`}
+                pace={PACE[step.part]}
                 submitLabel={index + 1 < steps.length ? 'Next question →' : 'Finish test and get feedback'}
                 onSubmit={answer => record({ part: step.part, question: step.question, answer })}
               />
             </div>
           </>
         )}
-        {step.type === 'prep' && <Preparation test={test} onDone={next} />}
+        {step.type === 'prep' && <Preparation card={test.part2} onDone={next} />}
         {step.type === 'longTurn' && (
-          <>
-            <Eyebrow>Part 2 · Long turn</Eyebrow>
-            <CueCard test={test} compact />
-            <div className="mt-6">
-              <AnswerBox
-                timeLimit={LONG_TURN_SECONDS}
-                autoRecord
-                placeholder="Recording has started — speak about the topic on your card."
-                submitLabel="Finish Part 2 →"
-                onSubmit={answer => record({ part: 2, question: test.part2.question, answer })}
-              />
-            </div>
-          </>
+          <LongTurn card={test.part2} draftKey={`${key}:${index}`} submitLabel="Finish Part 2 →"
+            onSubmit={answer => record({ part: 2, question: test.part2.question, answer })} />
         )}
       </div>
     </div>
@@ -226,42 +226,5 @@ function PartIntro({ part, script, onContinue }: { part: number; script: string;
       <p className="mt-5 text-base leading-relaxed text-muted sm:text-lg">“{script}”</p>
       <Button size="lg" className="mt-8" onClick={onContinue}>{part === 2 ? 'See my topic' : 'Begin Part ' + part}</Button>
     </section>
-  );
-}
-
-function CueCard({ test, compact = false }: { test: MockTest; compact?: boolean }) {
-  return (
-    <div className={`rounded-3xl border-2 border-dashed border-signal/50 bg-card ${compact ? 'mt-4 p-5' : 'p-7 sm:p-8'}`}>
-      <p className={`font-display font-semibold leading-snug ${compact ? 'text-lg' : 'text-2xl sm:text-3xl'}`}>{test.part2.prompt}</p>
-      <p className="mt-4 text-sm font-medium text-muted">You should say:</p>
-      <ul className={`mt-2 space-y-1 ${compact ? 'text-[15px]' : 'text-lg'}`}>
-        {test.part2.points.map(point => (
-          <li key={point} className="flex gap-2"><span className="text-signal" aria-hidden="true">•</span>{point}</li>
-        ))}
-      </ul>
-      <p className={`mt-2 ${compact ? 'text-[15px]' : 'text-lg'}`}>{test.part2.closing}</p>
-    </div>
-  );
-}
-
-function Preparation({ test, onDone }: { test: MockTest; onDone: () => void }) {
-  const left = useCountdown(PREP_SECONDS, onDone);
-  return (
-    <>
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <Eyebrow>Part 2 · Preparation</Eyebrow>
-          <h1 className="mt-3 text-2xl font-semibold sm:text-3xl">You have one minute to prepare.</h1>
-        </div>
-        <span className="font-display text-5xl font-semibold tabular-nums text-signal-strong" role="timer" aria-label={`${left} seconds left`}>{clock(left)}</span>
-      </div>
-      <div className="mt-6"><CueCard test={test} /></div>
-      <label htmlFor="notes" className="mt-6 block text-sm font-medium">Notes <span className="font-normal text-muted">(only for you — not sent or marked)</span></label>
-      <textarea id="notes" rows={4} className="mt-2 block w-full rounded-2xl border border-line bg-card p-4 focus:border-ink focus:outline-none" placeholder="Key words, examples, a story to tell…" />
-      <div className="mt-6 flex flex-wrap items-center gap-4">
-        <Button size="lg" onClick={onDone}>I’m ready — start speaking</Button>
-        <span className="text-sm text-muted">Recording starts automatically when the minute is up.</span>
-      </div>
-    </>
   );
 }

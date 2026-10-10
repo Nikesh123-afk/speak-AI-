@@ -24,6 +24,7 @@ class User(Base):
     plan: Mapped[str] = mapped_column(Text, server_default="free")
     stripe_customer_id: Mapped[str | None] = mapped_column(Text, unique=True)
     stripe_subscription_id: Mapped[str | None] = mapped_column(Text, unique=True)
+    email_verified_at: Mapped[datetime | None]
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
 
 
@@ -34,6 +35,22 @@ class AuthSession(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     expires_at: Mapped[datetime]
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+
+class EmailToken(Base):
+    """Single-use links sent by email. Only the SHA-256 of the token is stored."""
+    __tablename__ = "email_tokens"
+    __table_args__ = (
+        CheckConstraint("purpose IN ('reset','verify')", name="email_tokens_purpose"),
+        Index("email_tokens_user", "user_id"),
+        Index("email_tokens_expiration", "expires_at"),
+    )
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    purpose: Mapped[str] = mapped_column(Text)
+    # For verification: the address being verified, so a later email change invalidates the link.
+    email: Mapped[str] = mapped_column(Text)
+    expires_at: Mapped[datetime]
 
 
 class Practice(Base):
@@ -60,6 +77,7 @@ class Practice(Base):
 class Subscriber(Base):
     __tablename__ = "subscribers"
     email: Mapped[str] = mapped_column(Text, primary_key=True)
+    confirmed_at: Mapped[datetime | None]
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
 
 

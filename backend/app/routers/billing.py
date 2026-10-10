@@ -12,6 +12,7 @@ from ..schemas import CheckoutIn, UrlOut
 from ..security import rate_limit
 
 router = APIRouter(prefix="/api/billing", tags=["billing"])
+LIVE_STATUSES = ("active", "trialing", "past_due", "incomplete", "unpaid")
 HANDLED_EVENTS = {"customer.subscription.created", "customer.subscription.updated", "customer.subscription.deleted",
                   "invoice.paid", "invoice.payment_failed"}
 
@@ -21,6 +22,13 @@ def _client(request: Request) -> stripe.StripeClient:
     if client is None or not request.app.state.settings.billing_available:
         raise AppError(503, "Purchases are not available yet.")
     return client
+
+
+async def cancel_subscriptions(client: stripe.StripeClient, customer: str) -> None:
+    subscriptions = await client.v1.subscriptions.list_async({"customer": customer, "status": "all", "limit": 100})
+    for subscription in subscriptions.data:
+        if subscription.status in LIVE_STATUSES:
+            await client.v1.subscriptions.cancel_async(subscription.id)
 
 
 @router.post("/checkout")
@@ -77,7 +85,8 @@ async def webhook(request: Request, db: Db, settings: AppSettings) -> dict[str, 
     # Lock the user to serialise deliveries, then read Stripe's current state so event order does not matter.
     user = (await db.execute(select(User).where(User.stripe_customer_id == customer).with_for_update())).scalar_one_or_none()
     if user is None:
-        raise AppError(409, "Customer is not available yet; retry delivery.")
+        # The customer is stored before checkout starts, so an unknown one belongs to a deleted account.
+        return {"received": True}
     fresh = (await db.execute(insert(StripeEvent).values(id=event.id).on_conflict_do_nothing().returning(StripeEvent.id))).scalar_one_or_none()
     if fresh is None:
         await db.rollback()

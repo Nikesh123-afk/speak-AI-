@@ -94,7 +94,8 @@ async def test_billing_unconfigured(client):
     await signup(client)
     assert (await client.post("/api/billing/checkout", json={"plan": "standard"})).status_code == 503
     assert (await client.post("/api/billing/webhook", content=b"{}")).status_code == 503
-    assert (await client.get("/api/config")).json() == {"feedbackAvailable": True, "billingAvailable": False}
+    config = (await client.get("/api/config")).json()
+    assert config["feedbackAvailable"] is True and config["billingAvailable"] is False
 
 
 async def test_webhook_rejects_bad_signature(make_client, settings):
